@@ -90,3 +90,53 @@ test('zoom controls change the viewBox and fit resets it', async ({ page }) => {
   await page.getByTestId('zoom-fit').click();
   await expect(svg).toHaveAttribute('viewBox', DEFAULT_VIEWBOX);
 });
+
+test('zoom-aware labels: non-interchange labels hide at fit and reappear when zoomed in', async ({ page }) => {
+  await scrubTo(page, 1);
+  await expect(page.getByTestId('year')).toHaveText('2026');
+
+  const svg = page.getByTestId('map-svg');
+  // At fit (z=1), only interchange stations like Baker Street get labels.
+  await expect(svg.getByText('Maida Vale', { exact: true })).toBeHidden();
+  await expect(svg.getByText('Baker Street', { exact: true })).toBeVisible();
+
+  // Two zoom-in clicks give z ≈ 1.82, above the 1.6 threshold — all labels show.
+  await page.getByTestId('zoom-in').click();
+  await page.getByTestId('zoom-in').click();
+  await expect(svg.getByText('Maida Vale', { exact: true })).toBeVisible();
+});
+
+test('station search finds and jumps to a station', async ({ page }) => {
+  const search = page.getByTestId('station-search');
+  await search.fill('canary');
+
+  const results = page.getByTestId('search-result');
+  await expect(results.first()).toBeVisible();
+
+  await search.press('Enter');
+
+  await expect(page.getByTestId('panel-name')).toHaveText('Canary Wharf');
+  const svg = page.getByTestId('map-svg');
+  await expect(svg).toHaveAttribute('viewBox', /^-?\d+(\.\d+)? -?\d+(\.\d+)? 600 /);
+});
+
+test('station search matches historical names', async ({ page }) => {
+  // Fresh state at 1900 — Gower Street was Euston Square's original 1863 name.
+  const search = page.getByTestId('station-search');
+  await search.fill('gower');
+
+  await expect(page.getByTestId('search-result').first()).toBeVisible();
+});
+
+test('hovering a line highlights it and dims the others', async ({ page }) => {
+  await scrubTo(page, 1);
+  await expect(page.getByTestId('year')).toHaveText('2026');
+
+  // Widened hit-area polylines overlap each other at line crossings, so force
+  // the hover past Playwright's actionability/interception check.
+  const centralHit = page.locator('polyline[data-line-id="central"]').first();
+  await centralHit.hover({ force: true });
+
+  const dimmed = page.locator('polyline[opacity="0.15"]');
+  await expect(dimmed.first()).toBeVisible();
+});

@@ -8,8 +8,10 @@ const W = 2450,
 
 // Design data-props become fixed constants (the spec's defaults).
 const SHOW_CLOSED = true;
-const LABEL_DENSITY = 'all';
 const PLAY_SPEED = 4;
+// Below this zoom factor (z = W / view.w), only interchange stations get labels.
+const ZOOM_LABEL_THRESHOLD = 1.6;
+const DEFAULT_SVG_SCREEN_WIDTH = 1470;
 
 export default class App extends React.Component {
   constructor(props) {
@@ -22,6 +24,10 @@ export default class App extends React.Component {
       playing: false,
       view: { x: 0, y: 0, w: W, h: H },
       loaded: true,
+      search: '',
+      searchActiveIndex: -1,
+      hoverLine: null,
+      hoverStation: null,
     };
     this._svgRef = React.createRef();
     this._trackRef = React.createRef();
@@ -111,6 +117,55 @@ export default class App extends React.Component {
     return name;
   }
 
+  matchStations(query, year) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const { STATIONS } = this.data;
+    const out = [];
+    for (const id in STATIONS) {
+      const st = STATIONS[id];
+      const names = [st.n];
+      if (st.r) for (const [, n] of st.r) names.push(n);
+      const currentName = this.stationName(st, year);
+      if (!names.includes(currentName)) names.push(currentName);
+      if (names.join('\n').toLowerCase().includes(q)) {
+        const closed = st.c && year >= st.c;
+        out.push({
+          id,
+          name: currentName,
+          hint: closed ? 'closed ' + st.c + ' †' : 'opened ' + st.o,
+        });
+      }
+    }
+    return out.slice(0, 8);
+  }
+
+  selectStation(id) {
+    const st = this.data.STATIONS[id];
+    if (!st) return;
+    const w = 600,
+      h = w * (H / W);
+    this.setState({
+      sel: id,
+      search: '',
+      searchActiveIndex: -1,
+      view: { x: st.x - w / 2, y: st.y - h / 2, w, h },
+    });
+  }
+
+  setHoverLine(id) {
+    this.setState({ hoverLine: id });
+  }
+  clearHoverLine(id) {
+    this.setState((s) => (s.hoverLine === id || id === undefined ? { hoverLine: null } : null));
+  }
+  setHoverStation(id) {
+    this.setState({ hoverStation: id });
+  }
+  clearHoverStation(id) {
+    this.setState((s) => (s.hoverStation === id || id === undefined ? { hoverStation: null } : null));
+  }
+
   servingLines(id) {
     // all lines that ever serve this station, with year ranges
     const out = [];
@@ -130,9 +185,13 @@ export default class App extends React.Component {
   }
 
   renderVals() {
-    const { year, sel, playing, view, loaded } = this.state;
-    const density = LABEL_DENSITY;
+    const { year, sel, playing, view, loaded, search, searchActiveIndex, hoverLine, hoverStation } = this.state;
     const showClosed = SHOW_CLOSED;
+    // Zoom factor: 1 at fit (view.w === W), higher when zoomed in.
+    const z = W / view.w;
+    const svgEl = this._svgRef && this._svgRef.current;
+    const svgScreenWidth = (svgEl && svgEl.getBoundingClientRect().width) || DEFAULT_SVG_SCREEN_WIDTH;
+    const fontSvg = Math.min(26, Math.max(9, (11.5 * view.w) / svgScreenWidth));
 
     const vals = {
       yearLabel: String(year),
@@ -140,6 +199,7 @@ export default class App extends React.Component {
       pct: ((year - MINY) / (MAXY - MINY)) * 100,
       playGlyph: playing ? '❚❚' : '▶',
       segs: [],
+      hitSegs: [],
       stations: [],
       ghosts: [],
       legend: [],
@@ -157,8 +217,15 @@ export default class App extends React.Component {
       panelFact: false,
       panelLines: [],
       labelsLayer: [],
+      hoverLine,
+      search,
+      searchActiveIndex,
+      searchResults: [],
+      tooltip: null,
     };
     if (!loaded) return vals;
+
+    vals.searchResults = this.matchStations(search, year);
 
     const { STATIONS, LINES, EVENTS, OPERATORS } = this.data;
     vals.caption = (() => {
@@ -177,19 +244,25 @@ export default class App extends React.Component {
         const sg = line.segs[i];
         if (year < sg.o || (sg.c && year >= sg.c)) continue;
         const pts = sg.pts.map((p) => (Array.isArray(p) ? p : [STATIONS[p].x, STATIONS[p].y]));
+        const w = sg.w || 7;
         drawSegs.push({
           key: line.id + i,
+          lineId: line.id,
           points: pts.map((p) => p.join(',')).join(' '),
           color,
-          w: sg.w || 7,
+          w,
+          hitW: Math.max(w + 14, 20),
+          opacity: hoverLine ? (line.id === hoverLine ? 1 : 0.15) : 1,
         });
       }
     }
     drawSegs.sort((a, b) => b.w - a.w);
     vals.segs = drawSegs;
+    vals.hitSegs = drawSegs;
 
     // legend
     vals.legend = LINES.filter((l) => this.lineOpen(l, year)).map((l) => ({
+      id: l.id,
       name: this.latest(l.names, year),
       color: this.latest(l.colors, year),
     }));
@@ -207,18 +280,25 @@ export default class App extends React.Component {
     for (const id in STATIONS) {
       const st = STATIONS[id];
       const click = () => this.setState({ sel: id });
+      const isSel = id === sel;
+      const enter = () => this.setHoverStation(id);
+      const leave = () => this.clearHoverStation(id);
       if (this.stationVisible(id, year)) {
         const serving = this.servingLines(id).filter((s) => year >= s.o && (!s.c || year < s.c));
         const inter = serving.length >= 2;
-        const label = this.stationName(st, year);
-        const showLabel = density === 'all' || (density === 'major' && inter) ? label : '';
+        const fullLabel = this.stationName(st, year);
+        const showLabel = z >= ZOOM_LABEL_THRESHOLD || inter || isSel;
+        const servedByHover = !hoverLine || serving.some((s) => s.line.id === hoverLine);
         const p = lp(st);
         stations.push({
           id,
           x: st.x,
           y: st.y,
           onClick: click,
-          label: showLabel,
+          onMouseEnter: enter,
+          onMouseLeave: leave,
+          label: showLabel ? fullLabel : '',
+          fullLabel,
           lx: p.lx,
           ly: p.ly,
           anchor: p.anchor,
@@ -227,23 +307,42 @@ export default class App extends React.Component {
           fill: inter ? '#f2ecdc' : '#2c2620',
           stroke: '#2c2620',
           sw: inter ? 3 : 0,
+          opacity: servedByHover ? 1 : 0.25,
         });
       } else if (showClosed && st.c && year >= st.c) {
+        const fullLabel = this.stationName(st, 9999) + ' †';
+        const showLabel = z >= ZOOM_LABEL_THRESHOLD || isSel;
         const p = lp(st);
         ghosts.push({
           id,
           x: st.x,
           y: st.y,
           onClick: click,
-          label: this.stationName(st, 9999) + ' †',
+          onMouseEnter: enter,
+          onMouseLeave: leave,
+          label: showLabel ? fullLabel : '',
+          fullLabel,
           lx: p.lx,
           ly: p.ly,
           anchor: p.anchor,
+          opacity: hoverLine ? 0.2 : 0.55,
         });
       }
     }
     vals.stations = stations;
     vals.ghosts = ghosts;
+
+    // hover tooltip — only for a station whose label is currently hidden by zoom.
+    if (hoverStation) {
+      const hovered = stations.find((s) => s.id === hoverStation) || ghosts.find((g) => g.id === hoverStation);
+      if (hovered && !hovered.label) {
+        vals.tooltip = {
+          text: hovered.fullLabel,
+          leftPct: ((hovered.x - view.x) / view.w) * 100,
+          topPct: ((hovered.y - view.y) / view.h) * 100,
+        };
+      }
+    }
 
     // SVG <text> labels must be real text nodes — built here as elements.
     const labels = [];
@@ -258,7 +357,7 @@ export default class App extends React.Component {
               y: s.ly,
               textAnchor: s.anchor,
               fontWeight: s.fw,
-              style: { fontFamily: "'Hammersmith One',sans-serif", fontSize: 13, fill: '#2c2620' },
+              style: { fontFamily: "'Hammersmith One',sans-serif", fontSize: fontSvg, fill: '#2c2620' },
             },
             s.label
           )
@@ -275,7 +374,7 @@ export default class App extends React.Component {
             opacity: 0.65,
             style: {
               fontFamily: "'Hammersmith One',sans-serif",
-              fontSize: 13,
+              fontSize: fontSvg,
               fontStyle: 'italic',
               fill: '#8d8172',
             },
@@ -316,6 +415,29 @@ export default class App extends React.Component {
       });
     }
     return vals;
+  }
+
+  // --- station search ---
+  handleSearchChange(e) {
+    this.setState({ search: e.target.value, searchActiveIndex: -1 });
+  }
+  handleSearchKeyDown(e) {
+    const results = this.matchStations(this.state.search, this.state.year);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (results.length) this.setState((s) => ({ searchActiveIndex: Math.min(results.length - 1, s.searchActiveIndex + 1) }));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (results.length) this.setState((s) => ({ searchActiveIndex: Math.max(0, s.searchActiveIndex - 1) }));
+    } else if (e.key === 'Enter') {
+      if (results.length) {
+        const idx = this.state.searchActiveIndex >= 0 ? this.state.searchActiveIndex : 0;
+        this.selectStation(results[idx].id);
+      }
+    } else if (e.key === 'Escape') {
+      e.currentTarget.blur();
+      this.setState({ search: '', searchActiveIndex: -1 });
+    }
   }
 
   togglePlay() {
@@ -495,6 +617,20 @@ export default class App extends React.Component {
                       strokeWidth={sg.w}
                       strokeLinejoin="round"
                       strokeLinecap="round"
+                      opacity={sg.opacity}
+                    />
+                  ))}
+                  {v.hitSegs.map((sg) => (
+                    <polyline
+                      key={'hit' + sg.key}
+                      data-line-id={sg.lineId}
+                      points={sg.points}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={sg.hitW}
+                      style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                      onMouseEnter={() => this.setHoverLine(sg.lineId)}
+                      onMouseLeave={() => this.clearHoverLine(sg.lineId)}
                     />
                   ))}
                   {v.ghosts.map((g) => (
@@ -502,8 +638,10 @@ export default class App extends React.Component {
                       key={'gh' + g.id}
                       data-station-id={g.id}
                       data-ghost="true"
-                      opacity="0.55"
+                      opacity={g.opacity}
                       onClick={g.onClick}
+                      onMouseEnter={g.onMouseEnter}
+                      onMouseLeave={g.onMouseLeave}
                       style={{ cursor: 'pointer' }}
                     >
                       <circle
@@ -523,7 +661,10 @@ export default class App extends React.Component {
                       key={'st' + s.id}
                       data-station-id={s.id}
                       data-testid={'station-' + s.id}
+                      opacity={s.opacity}
                       onClick={s.onClick}
+                      onMouseEnter={s.onMouseEnter}
+                      onMouseLeave={s.onMouseLeave}
                       style={{ cursor: 'pointer' }}
                     >
                       <circle
@@ -552,60 +693,154 @@ export default class App extends React.Component {
                 </g>
               </svg>
 
-              {/* Legend */}
+              {/* Station tooltip (shown when a station's label is hidden by zoom) */}
+              {v.tooltip && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: v.tooltip.leftPct + '%',
+                    top: v.tooltip.topPct + '%',
+                    transform: 'translate(-50%,-140%)',
+                    background: '#faf5e8',
+                    border: '1px solid #b8ab8c',
+                    padding: '2px 7px',
+                    fontFamily: "'Hammersmith One',sans-serif",
+                    fontSize: 12,
+                    color: '#2c2620',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {v.tooltip.text}
+                </div>
+              )}
+
+              {/* Search + Legend */}
               <div
-                data-testid="legend"
                 style={{
                   position: 'absolute',
                   top: 12,
                   left: 12,
-                  background: 'rgba(250,245,232,.93)',
-                  border: '1px solid #b8ab8c',
-                  padding: '10px 14px 8px',
-                  maxWidth: 250,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 11,
-                    letterSpacing: '2px',
-                    color: '#7a6f5c',
-                    marginBottom: 6,
-                  }}
-                >
-                  LINES OF {v.yearLabel}
-                </div>
-                {v.legend.map((l, i) => (
-                  <div
-                    key={'leg' + i}
-                    data-testid="legend-row"
+                <div style={{ position: 'relative' }}>
+                  <input
+                    data-testid="station-search"
+                    type="text"
+                    value={v.search}
+                    placeholder="Find a station…"
+                    onChange={(e) => this.handleSearchChange(e)}
+                    onKeyDown={(e) => this.handleSearchKeyDown(e)}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '1.5px 0',
+                      width: 230,
+                      boxSizing: 'border-box',
+                      background: '#faf5e8',
+                      border: '1px solid #4a4133',
+                      font: "400 13px 'Hammersmith One',sans-serif",
+                      color: '#2c2620',
+                      padding: '7px 10px',
                     }}
-                  >
-                    <span
+                  />
+                  {v.search.trim() !== '' && v.searchResults.length > 0 && (
+                    <div
                       style={{
-                        width: 22,
-                        height: 5,
-                        background: l.color,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontSize: '12.5px',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        marginTop: 2,
+                        background: '#faf5e8',
+                        border: '1px solid #4a4133',
+                        maxHeight: 260,
+                        overflowY: 'auto',
+                        zIndex: 2,
                       }}
                     >
-                      {l.name}
-                    </span>
+                      {v.searchResults.map((r, i) => (
+                        <div
+                          key={r.id}
+                          data-testid="search-result"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            this.selectStation(r.id);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '6px 10px',
+                            cursor: 'pointer',
+                            background: i === v.searchActiveIndex ? '#ede6d2' : 'transparent',
+                          }}
+                        >
+                          <span style={{ fontSize: '12.5px', flex: 1 }}>{r.name}</span>
+                          <span style={{ fontSize: '11px', color: '#7a6f5c', flexShrink: 0 }}>
+                            {r.hint}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  data-testid="legend"
+                  style={{
+                    background: 'rgba(250,245,232,.93)',
+                    border: '1px solid #b8ab8c',
+                    padding: '10px 14px 8px',
+                    maxWidth: 250,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: '2px',
+                      color: '#7a6f5c',
+                      marginBottom: 6,
+                    }}
+                  >
+                    LINES OF {v.yearLabel}
                   </div>
-                ))}
+                  {v.legend.map((l, i) => (
+                    <div
+                      key={'leg' + i}
+                      data-testid="legend-row"
+                      onMouseEnter={() => this.setHoverLine(l.id)}
+                      onMouseLeave={() => this.clearHoverLine(l.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '1.5px 0',
+                        cursor: 'default',
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 22,
+                          height: 5,
+                          background: l.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: '12.5px',
+                          fontWeight: v.hoverLine === l.id ? 700 : 400,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {l.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Zoom controls */}
