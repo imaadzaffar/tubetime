@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#e3dcc6;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;background:#f2ecdc;font-family:'Old Standard TT',serif;color:#2c2620;overflow:hidden;">
+  <div style="flex:1;display:flex;flex-direction:column;border:2px solid #4a4133;margin:10px;min-height:0;">
+  <div style="flex:1;display:flex;flex-direction:column;border:1px solid #4a4133;margin:2px;min-height:0;background:#f2ecdc;">
+
+    <!-- Header -->
+    <div data-screen-label="Header" style="display:flex;align-items:baseline;gap:18px;padding:12px 22px 10px;border-bottom:1px solid #b8ab8c;flex-wrap:wrap;">
+      <div style="font-size:21px;font-weight:700;letter-spacing:2.5px;">LONDON&rsquo;S UNDERGROUND RAILWAYS</div>
+      <div style="font-style:italic;font-size:13px;color:#7a6f5c;">An Atlas of the Network Through Time &middot; 1900&ndash;2026</div>
+      <div style="margin-left:auto;display:flex;align-items:baseline;gap:14px;">
+        <div style="font-size:12px;letter-spacing:1.5px;color:#7a6f5c;">{{ operatorName }}</div>
+        <div style="font-size:34px;font-weight:700;line-height:1;">{{ yearLabel }}</div>
+      </div>
+    </div>
+
+    <!-- Map area -->
+    <div data-screen-label="Map" style="flex:1;position:relative;min-height:0;overflow:hidden;">
+      <svg width="100%" height="100%" viewBox="{{ viewBox }}" preserveAspectRatio="xMidYMid meet" style="display:block;cursor:grab;touch-action:none;user-select:none;" onPointerDown="{{ panStart }}" onPointerMove="{{ panMove }}" onPointerUp="{{ panEnd }}" onPointerLeave="{{ panEnd }}" ref="{{ svgRef }}">
+        <g>
+          <sc-for list="{{ segs }}" as="sg" hint-placeholder-count="0">
+            <polyline points="{{ sg.points }}" fill="none" stroke="{{ sg.color }}" stroke-width="{{ sg.w }}" stroke-linejoin="round" stroke-linecap="round"></polyline>
+          </sc-for>
+          <sc-for list="{{ ghosts }}" as="g" hint-placeholder-count="0">
+            <g opacity="0.55" onClick="{{ g.onClick }}" style="cursor:pointer;">
+              <circle cx="{{ g.x }}" cy="{{ g.y }}" r="6" fill="#f2ecdc" stroke="#8d8172" stroke-width="2" stroke-dasharray="3 2.5"></circle>
+            </g>
+          </sc-for>
+          <sc-for list="{{ stations }}" as="s" hint-placeholder-count="0">
+            <g onClick="{{ s.onClick }}" style="cursor:pointer;">
+              <circle cx="{{ s.x }}" cy="{{ s.y }}" r="{{ s.r }}" fill="{{ s.fill }}" stroke="{{ s.stroke }}" stroke-width="{{ s.sw }}"></circle>
+              <circle cx="{{ s.x }}" cy="{{ s.y }}" r="14" fill="transparent"></circle>
+            </g>
+          </sc-for>
+          <g style="pointer-events:none;">{{ labelsLayer }}</g>
+          <sc-if value="{{ selMarker }}" hint-placeholder-val="{{ false }}">
+            <circle cx="{{ selX }}" cy="{{ selY }}" r="15" fill="none" stroke="#a8402e" stroke-width="2.5" style="pointer-events:none;"></circle>
+          </sc-if>
+        </g>
+      </svg>
+
+      <!-- Legend -->
+      <div style="position:absolute;top:12px;left:12px;background:rgba(250,245,232,.93);border:1px solid #b8ab8c;padding:10px 14px 8px;max-width:250px;">
+        <div style="font-size:11px;letter-spacing:2px;color:#7a6f5c;margin-bottom:6px;">LINES OF {{ yearLabel }}</div>
+        <sc-for list="{{ legend }}" as="l" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:8px;padding:1.5px 0;">
+            <span style="width:22px;height:5px;background:{{ l.color }};flex-shrink:0;"></span>
+            <span style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ l.name }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- Zoom controls -->
+      <div style="position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:6px;">
+        <button onClick="{{ zoomIn }}" style="width:34px;height:34px;border:1px solid #4a4133;background:#faf5e8;font:700 18px 'Old Standard TT',serif;color:#2c2620;cursor:pointer;">+</button>
+        <button onClick="{{ zoomOut }}" style="width:34px;height:34px;border:1px solid #4a4133;background:#faf5e8;font:700 18px 'Old Standard TT',serif;color:#2c2620;cursor:pointer;">&minus;</button>
+        <button onClick="{{ zoomReset }}" title="Fit map" style="width:34px;height:34px;border:1px solid #4a4133;background:#faf5e8;font:400 11px 'Old Standard TT',serif;color:#2c2620;cursor:pointer;">fit</button>
+      </div>
+
+      <!-- Station panel -->
+      <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Station panel" style="position:absolute;right:12px;bottom:12px;width:min(330px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;background:#faf5e8;border:1px solid #b8ab8c;box-shadow:0 3px 14px rgba(44,38,32,.18);padding:16px 18px;animation:fadeUp .25s ease;">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <div style="flex:1;">
+              <div style="font-size:20px;font-weight:700;line-height:1.15;">{{ panelName }}</div>
+              <div style="font-size:11px;letter-spacing:1.8px;color:#7a6f5c;margin-top:4px;">{{ panelDates }}</div>
+            </div>
+            <button onClick="{{ closePanel }}" style="border:none;background:none;font:400 20px 'Old Standard TT',serif;color:#7a6f5c;cursor:pointer;line-height:1;padding:0 2px;">&times;</button>
+          </div>
+          <sc-if value="{{ panelRenames }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12.5px;font-style:italic;color:#7a6f5c;margin-top:7px;">{{ panelRenames }}</div>
+          </sc-if>
+          <div style="border-top:1px solid #d8cfb6;margin-top:10px;padding-top:9px;">
+            <div style="font-size:11px;letter-spacing:2px;color:#7a6f5c;">NAME ORIGIN</div>
+            <p style="font-size:13.5px;line-height:1.55;margin:4px 0 0;">{{ panelOrigin }}</p>
+          </div>
+          <sc-if value="{{ panelFact }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top:1px solid #d8cfb6;margin-top:10px;padding-top:9px;">
+              <div style="font-size:11px;letter-spacing:2px;color:#7a6f5c;">NOTES</div>
+              <p style="font-size:13.5px;line-height:1.55;margin:4px 0 0;">{{ panelFact }}</p>
+            </div>
+          </sc-if>
+          <div style="border-top:1px solid #d8cfb6;margin-top:10px;padding-top:9px;">
+            <div style="font-size:11px;letter-spacing:2px;color:#7a6f5c;">LINES THROUGH TIME</div>
+            <div style="display:flex;flex-direction:column;gap:3px;margin-top:5px;">
+              <sc-for list="{{ panelLines }}" as="pl" hint-placeholder-count="1">
+                <div style="display:flex;align-items:center;gap:8px;opacity:{{ pl.op }};">
+                  <span style="width:20px;height:5px;background:{{ pl.color }};flex-shrink:0;"></span>
+                  <span style="font-size:12.5px;">{{ pl.name }}</span>
+                  <span style="font-size:11.5px;color:#7a6f5c;margin-left:auto;">{{ pl.range }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- Timeline -->
+    <div data-screen-label="Timeline" style="border-top:1px solid #b8ab8c;padding:12px 22px 10px;background:#ede6d2;">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <button onClick="{{ togglePlay }}" style="width:44px;height:44px;border:1.5px solid #4a4133;background:#faf5e8;font:400 15px 'Old Standard TT',serif;color:#2c2620;cursor:pointer;flex-shrink:0;">{{ playGlyph }}</button>
+        <div style="font-size:13px;color:#7a6f5c;flex-shrink:0;">1900</div>
+        <div style="flex:1;position:relative;height:44px;cursor:pointer;touch-action:none;" onPointerDown="{{ trackDown }}" onPointerMove="{{ trackMove }}" onPointerUp="{{ trackUp }}" ref="{{ trackRef }}">
+          <div style="position:absolute;left:0;right:0;top:21px;height:3px;background:#c9bd9e;"></div>
+          <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="0">
+            <div style="position:absolute;left:{{ t.pct }}%;top:17px;width:1.5px;height:11px;background:#a3966f;"></div>
+          </sc-for>
+          <div style="position:absolute;left:0;top:21px;height:3px;background:#4a4133;width:{{ pct }}%;"></div>
+          <div style="position:absolute;left:{{ pct }}%;top:22.5px;transform:translate(-50%,-50%) rotate(45deg);width:13px;height:13px;background:#faf5e8;border:2px solid #2c2620;pointer-events:none;"></div>
+        </div>
+        <div style="font-size:13px;color:#7a6f5c;flex-shrink:0;">2026</div>
+      </div>
+      <div style="text-align:center;font-style:italic;font-size:13.5px;color:#4a4133;margin-top:4px;min-height:19px;">{{ caption }}</div>
+    </div>
+
+  </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showClosed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Map&quot;,&quot;description&quot;:&quot;Show closed stations as ghost markers&quot;},&quot;labelDensity&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;all&quot;,&quot;major&quot;,&quot;none&quot;],&quot;default&quot;:&quot;all&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Map&quot;,&quot;description&quot;:&quot;Which station labels to draw&quot;},&quot;playSpeed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:4,&quot;min&quot;:1,&quot;max&quot;:12,&quot;step&quot;:1,&quot;unit&quot;:&quot;yrs/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Timeline&quot;}}">
+const W = 2450, H = 1560, MINY = 1900, MAXY = 2026;
+
+class Component extends DCLogic {
+  state = { year: 1900, sel: null, playing: false, view: { x: 0, y: 0, w: W, h: H }, loaded: false };
+
+  componentDidMount() {
+    import('./tube-data.js').then(m => {
+      this.data = m;
+      let y = MINY;
+      try { const s = localStorage.getItem('tube-atlas-year'); if (s) y = Math.min(MAXY, Math.max(MINY, +s)); } catch (e) {}
+      this.setState({ loaded: true, year: y });
+    });
+    this._svgRef = React.createRef();
+    this._trackRef = React.createRef();
+    this._wheelBound = false;
+  }
+
+  componentDidUpdate() {
+    const el = this._svgRef && this._svgRef.current;
+    if (el && !this._wheelBound) {
+      this._wheelBound = true;
+      el.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const { view } = this.state;
+        const fx = (e.clientX - rect.left) / rect.width, fy = (e.clientY - rect.top) / rect.height;
+        const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+        this.zoomAt(fx, fy, k);
+      }, { passive: false });
+    }
+  }
+
+  componentWillUnmount() { clearInterval(this._timer); }
+
+  setYear(y) {
+    y = Math.round(Math.min(MAXY, Math.max(MINY, y)));
+    if (y !== this.state.year) {
+      this.setState({ year: y });
+      try { localStorage.setItem('tube-atlas-year', String(y)); } catch (e) {}
+    }
+  }
+
+  zoomAt(fx, fy, k) {
+    const v = this.state.view;
+    let w = Math.min(W * 1.4, Math.max(280, v.w * k));
+    const h = w * (v.h / v.w);
+    const x = v.x + fx * (v.w - w), y = v.y + fy * (v.h / v.w * v.w - h) * (v.h / v.h) ;
+    this.setState({ view: { x: v.x + fx * (v.w - w), y: v.y + fy * (v.h - h), w, h } });
+  }
+
+  latest(arr, year) { let out = null; for (const [y, v] of arr) if (y <= year) out = v; return out; }
+
+  lineOpen(line, year) { return line.segs.some(s => year >= s.o && (!s.c || year < s.c)); }
+
+  stationVisible(id, year) {
+    const st = this.data.STATIONS[id];
+    if (!st || year < st.o || (st.c && year >= st.c)) return false;
+    for (const line of this.data.LINES)
+      for (const sg of line.segs)
+        if (year >= sg.o && (!sg.c || year < sg.c) && sg.pts.includes(id)) return true;
+    return false;
+  }
+
+  stationName(st, year) {
+    if (!st.r) return st.n;
+    let name = st.r[0][1];
+    for (const [y, n] of st.r) if (y <= year) name = n;
+    return name;
+  }
+
+  servingLines(id) {
+    // all lines that ever serve this station, with year ranges
+    const out = [];
+    for (const line of this.data.LINES) {
+      let o = null, c = null;
+      for (const sg of line.segs) if (sg.pts.includes(id)) {
+        if (o === null || sg.o < o) o = sg.o;
+        if (sg.c) { if (c === null || sg.c > c) c = c === null ? sg.c : Math.max(c, sg.c); } else c = Infinity;
+      }
+      if (o !== null) out.push({ line, o, c: c === Infinity ? null : c });
+    }
+    return out.sort((a, b) => a.o - b.o);
+  }
+
+  renderVals() {
+    const { year, sel, playing, view, loaded } = this.state;
+    const density = this.props.labelDensity ?? 'all';
+    const showClosed = this.props.showClosed ?? true;
+    const speed = this.props.playSpeed ?? 4;
+
+    const vals = {
+      yearLabel: String(year),
+      viewBox: `${view.x} ${view.y} ${view.w} ${view.h}`,
+      pct: ((year - MINY) / (MAXY - MINY)) * 100,
+      playGlyph: playing ? '❚❚' : '▶',
+      svgRef: this._svgRef, trackRef: this._trackRef,
+      segs: [], stations: [], ghosts: [], legend: [], ticks: [],
+      caption: '', operatorName: '', panelOpen: false,
+      selMarker: false, selX: 0, selY: 0,
+      panelName: '', panelDates: '', panelRenames: false, panelOrigin: '', panelFact: false, panelLines: [],
+      zoomIn: () => this.zoomAt(0.5, 0.5, 1 / 1.35),
+      zoomOut: () => this.zoomAt(0.5, 0.5, 1.35),
+      zoomReset: () => this.setState({ view: { x: 0, y: 0, w: W, h: H } }),
+      closePanel: () => this.setState({ sel: null }),
+      togglePlay: () => this.togglePlay(),
+      panStart: (e) => this.panStart(e), panMove: (e) => this.panMove(e), panEnd: (e) => this.panEnd(e),
+      trackDown: (e) => this.trackDown(e), trackMove: (e) => this.trackMove(e), trackUp: (e) => this.trackUp(e),
+    };
+    if (!loaded) return vals;
+
+    const { STATIONS, LINES, EVENTS, OPERATORS } = this.data;
+    vals.caption = (() => { let t = ''; for (const [y, txt] of EVENTS) if (y <= year) t = y + ' — ' + txt; return t; })();
+    vals.operatorName = (this.latest(OPERATORS, year) || '').toUpperCase();
+    vals.ticks = EVENTS.map(([y]) => ({ pct: ((y - MINY) / (MAXY - MINY)) * 100 }));
+
+    // segments, wide (underlay) first
+    const drawSegs = [];
+    for (const line of LINES) {
+      const color = this.latest(line.colors, year);
+      for (let i = 0; i < line.segs.length; i++) {
+        const sg = line.segs[i];
+        if (year < sg.o || (sg.c && year >= sg.c)) continue;
+        const pts = sg.pts.map(p => Array.isArray(p) ? p : [STATIONS[p].x, STATIONS[p].y]);
+        drawSegs.push({ key: line.id + i, points: pts.map(p => p.join(',')).join(' '), color, w: sg.w || 7 });
+      }
+    }
+    drawSegs.sort((a, b) => b.w - a.w);
+    vals.segs = drawSegs;
+
+    // legend
+    vals.legend = LINES.filter(l => this.lineOpen(l, year)).map(l => ({ name: this.latest(l.names, year), color: this.latest(l.colors, year) }));
+
+    // stations
+    const lp = (st) => {
+      const d = st.lp || 'n';
+      if (d === 'e') return { lx: st.x + 14, ly: st.y + 4.5, anchor: 'start' };
+      if (d === 'w') return { lx: st.x - 14, ly: st.y + 4.5, anchor: 'end' };
+      if (d === 's') return { lx: st.x, ly: st.y + 24, anchor: 'middle' };
+      return { lx: st.x, ly: st.y - 13, anchor: 'middle' };
+    };
+    const stations = [], ghosts = [];
+    for (const id in STATIONS) {
+      const st = STATIONS[id];
+      const click = () => this.setState({ sel: id });
+      if (this.stationVisible(id, year)) {
+        const serving = this.servingLines(id).filter(s => year >= s.o && (!s.c || year < s.c));
+        const inter = serving.length >= 2;
+        const label = this.stationName(st, year);
+        const showLabel = density === 'all' || (density === 'major' && inter) ? label : '';
+        const p = lp(st);
+        stations.push({
+          x: st.x, y: st.y, onClick: click, label: showLabel,
+          lx: p.lx, ly: p.ly, anchor: p.anchor, fw: inter ? 700 : 400,
+          r: inter ? 8 : 5, fill: inter ? '#f2ecdc' : '#2c2620',
+          stroke: '#2c2620', sw: inter ? 3 : 0,
+        });
+      } else if (showClosed && st.c && year >= st.c) {
+        const p = lp(st);
+        ghosts.push({ x: st.x, y: st.y, onClick: click, label: this.stationName(st, 9999) + ' †', lx: p.lx, ly: p.ly, anchor: p.anchor });
+      }
+    }
+    vals.stations = stations; vals.ghosts = ghosts;
+
+    // SVG <text> labels must be real text nodes — built here, not via template holes
+    const labels = [];
+    for (const s of stations) if (s.label) labels.push(React.createElement('text', {
+      key: 'l' + s.x + ',' + s.y, x: s.lx, y: s.ly, textAnchor: s.anchor, fontWeight: s.fw,
+      style: { fontFamily: "'Old Standard TT',serif", fontSize: 13, fill: '#2c2620' },
+    }, s.label));
+    for (const g of ghosts) labels.push(React.createElement('text', {
+      key: 'g' + g.x + ',' + g.y, x: g.lx, y: g.ly, textAnchor: g.anchor, opacity: 0.65,
+      style: { fontFamily: "'Old Standard TT',serif", fontSize: 13, fontStyle: 'italic', fill: '#8d8172' },
+    }, g.label));
+    vals.labelsLayer = labels;
+
+    // selected panel
+    if (sel && STATIONS[sel]) {
+      const st = STATIONS[sel];
+      vals.panelOpen = true;
+      vals.selMarker = true; vals.selX = st.x; vals.selY = st.y;
+      vals.panelName = this.stationName(st, Math.max(year, st.o));
+      let dates = 'OPENED ' + st.o;
+      if (st.c) dates += ' · CLOSED ' + st.c;
+      if (year < st.o) dates += ' · NOT YET BUILT IN ' + year;
+      vals.panelDates = dates;
+      if (st.r && st.r.length > 1) {
+        const parts = [];
+        for (let i = 0; i < st.r.length - 1; i++) parts.push('“' + st.r[i][1] + '” until ' + st.r[i + 1][0]);
+        vals.panelRenames = 'Formerly ' + parts.join('; ') + '.';
+      }
+      vals.panelOrigin = st.e;
+      vals.panelFact = st.f || false;
+      vals.panelLines = this.servingLines(sel).map(({ line, o, c }) => {
+        const active = year >= o && (!c || year < c);
+        return {
+          name: this.latest(line.names, Math.max(year, o)),
+          color: this.latest(line.colors, Math.max(year, o)),
+          range: o + '–' + (c ? c : ''),
+          op: active ? 1 : 0.45,
+        };
+      });
+    }
+    return vals;
+  }
+
+  togglePlay() {
+    if (this.state.playing) {
+      clearInterval(this._timer);
+      this.setState({ playing: false });
+    } else {
+      let y = this.state.year >= MAXY ? MINY : this.state.year;
+      this.setState({ playing: true, year: y });
+      const speed = this.props.playSpeed ?? 4;
+      this._acc = y;
+      this._timer = setInterval(() => {
+        this._acc += speed / 10;
+        if (this._acc >= MAXY) { this._acc = MAXY; clearInterval(this._timer); this.setState({ playing: false }); }
+        this.setYear(this._acc);
+      }, 100);
+    }
+  }
+
+  // --- map pan ---
+  panStart(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    this._pan = { x: e.clientX, y: e.clientY, view: { ...this.state.view } };
+    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  panMove(e) {
+    if (!this._pan) return;
+    const el = this._svgRef.current; if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const scale = this.state.view.w / rect.width;
+    const dx = (e.clientX - this._pan.x) * scale, dy = (e.clientY - this._pan.y) * scale;
+    this.setState({ view: { ...this.state.view, x: this._pan.view.x - dx, y: this._pan.view.y - dy } });
+  }
+  panEnd() { this._pan = null; }
+
+  // --- timeline track ---
+  yearFromEvent(e) {
+    const el = this._trackRef.current; if (!el) return this.state.year;
+    const rect = el.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    return MINY + f * (MAXY - MINY);
+  }
+  trackDown(e) {
+    this._drag = true;
+    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId);
+    if (this.state.playing) this.togglePlay();
+    this.setYear(this.yearFromEvent(e));
+  }
+  trackMove(e) { if (this._drag) this.setYear(this.yearFromEvent(e)); }
+  trackUp() { this._drag = false; }
+}
+</script>
+</body>
+</html>
