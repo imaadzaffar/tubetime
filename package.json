@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "oxlint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:layout": "node scripts/check-layout.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

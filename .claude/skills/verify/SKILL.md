@@ -38,3 +38,11 @@ Surface is a single-page SVG map. Flows worth driving after any change:
 ## Tests
 `npx playwright test` (chromium, auto-starts dev server). E2E specs in
 tests/atlas.spec.js.
+
+## Layout invariants
+The map is a Beck-style octolinear schematic. After ANY coordinate/waypoint
+change in src/tube-data.js run `npm run check:layout` — it asserts every
+polyline run is 0/45/90°, stations ≥45 units apart, nothing rides through a
+foreign station (<25 units), coords on the 5-grid and in-bounds. Express
+pass-throughs (Elizabeth over Oxford Circus, Met over St John's Wood /
+Swiss Cottage) are allowlisted in scripts/check-layout.mjs.

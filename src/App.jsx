@@ -1,5 +1,5 @@
 import React from 'react';
-import { STATIONS, LINES, EVENTS, OPERATORS } from './tube-data.js';
+import { STATIONS, LINES, EVENTS, OPERATORS, THAMES } from './tube-data.js';
 
 const W = 2450,
   H = 1560,
@@ -608,6 +608,16 @@ export default class App extends React.Component {
                 ref={this._svgRef}
               >
                 <g>
+                  <polyline
+                    points={THAMES.map((p) => p.join(',')).join(' ')}
+                    fill="none"
+                    stroke="#c4d8dc"
+                    strokeWidth={26}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    opacity={0.8}
+                    style={{ pointerEvents: 'none' }}
+                  />
                   {v.segs.map((sg) => (
                     <polyline
                       key={sg.key}
