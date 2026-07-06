@@ -26,6 +26,7 @@ export default class App extends React.Component {
       search: '',
       searchActiveIndex: -1,
       hoverLine: null,
+      legendOpen: typeof window === 'undefined' || window.innerWidth > 700,
     };
     this._svgRef = React.createRef();
     this._trackRef = React.createRef();
@@ -769,21 +770,27 @@ export default class App extends React.Component {
                   style={{
                     background: 'rgba(250,245,232,.93)',
                     border: '1px solid #b8ab8c',
-                    padding: '10px 14px 8px',
+                    padding: this.state.legendOpen ? '10px 14px 8px' : '8px 14px',
                     maxWidth: 250,
+                    alignSelf: 'flex-start',
                   }}
                 >
                   <div
+                    data-testid="legend-toggle"
+                    onClick={() => this.setState((st) => ({ legendOpen: !st.legendOpen }))}
                     style={{
                       fontSize: 11,
                       letterSpacing: '2px',
                       color: '#7a6f5c',
-                      marginBottom: 6,
+                      marginBottom: this.state.legendOpen ? 6 : 0,
+                      cursor: 'pointer',
+                      userSelect: 'none',
                     }}
                   >
-                    LINES OF {v.yearLabel}
+                    LINES OF {v.yearLabel} {this.state.legendOpen ? '\u25be' : '\u25b8'}
                   </div>
-                  {v.legend.map((l, i) => (
+                  {this.state.legendOpen &&
+                  v.legend.map((l, i) => (
                     <div
                       key={'leg' + i}
                       data-testid="legend-row"

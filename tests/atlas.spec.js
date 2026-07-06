@@ -168,3 +168,19 @@ test('hovering a line highlights it and dims the others', async ({ page }) => {
   const dimmed = page.locator('polyline[opacity="0.15"]');
   await expect(dimmed.first()).toBeVisible();
 });
+
+test('legend collapses to a chip on mobile and expands on tap', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.evaluate(() => document.fonts.ready);
+
+  // Collapsed by default on narrow screens: header chip visible, rows hidden.
+  await expect(page.getByTestId('legend-toggle')).toBeVisible();
+  await expect(page.getByTestId('legend-row').first()).toBeHidden();
+
+  await page.getByTestId('legend-toggle').click();
+  await expect(page.getByTestId('legend-row').first()).toBeVisible();
+
+  await page.getByTestId('legend-toggle').click();
+  await expect(page.getByTestId('legend-row').first()).toBeHidden();
+});
