@@ -1,5 +1,6 @@
 import React from 'react';
 import { STATIONS, LINES, EVENTS, OPERATORS, THAMES } from './tube-data.js';
+import { LABEL_FS, labelLayout } from './label-layout.js';
 
 const W = 2450,
   H = 1560,
@@ -10,8 +11,6 @@ const W = 2450,
 const SHOW_CLOSED = true;
 const PLAY_SPEED = 4;
 // Below this zoom factor (z = W / view.w), only interchange stations get labels.
-const ZOOM_LABEL_THRESHOLD = 1.6;
-const DEFAULT_SVG_SCREEN_WIDTH = 1470;
 
 export default class App extends React.Component {
   constructor(props) {
@@ -27,7 +26,6 @@ export default class App extends React.Component {
       search: '',
       searchActiveIndex: -1,
       hoverLine: null,
-      hoverStation: null,
     };
     this._svgRef = React.createRef();
     this._trackRef = React.createRef();
@@ -159,12 +157,6 @@ export default class App extends React.Component {
   clearHoverLine(id) {
     this.setState((s) => (s.hoverLine === id || id === undefined ? { hoverLine: null } : null));
   }
-  setHoverStation(id) {
-    this.setState({ hoverStation: id });
-  }
-  clearHoverStation(id) {
-    this.setState((s) => (s.hoverStation === id || id === undefined ? { hoverStation: null } : null));
-  }
 
   servingLines(id) {
     // all lines that ever serve this station, with year ranges
@@ -185,13 +177,8 @@ export default class App extends React.Component {
   }
 
   renderVals() {
-    const { year, sel, playing, view, loaded, search, searchActiveIndex, hoverLine, hoverStation } = this.state;
+    const { year, sel, playing, view, loaded, search, searchActiveIndex, hoverLine } = this.state;
     const showClosed = SHOW_CLOSED;
-    // Zoom factor: 1 at fit (view.w === W), higher when zoomed in.
-    const z = W / view.w;
-    const svgEl = this._svgRef && this._svgRef.current;
-    const svgScreenWidth = (svgEl && svgEl.getBoundingClientRect().width) || DEFAULT_SVG_SCREEN_WIDTH;
-    const fontSvg = Math.min(26, Math.max(9, (11.5 * view.w) / svgScreenWidth));
 
     const vals = {
       yearLabel: String(year),
@@ -221,7 +208,6 @@ export default class App extends React.Component {
       search,
       searchActiveIndex,
       searchResults: [],
-      tooltip: null,
     };
     if (!loaded) return vals;
 
@@ -268,40 +254,22 @@ export default class App extends React.Component {
     }));
 
     // stations
-    const lp = (st) => {
-      const d = st.lp || 'n';
-      if (d === 'e') return { lx: st.x + 14, ly: st.y + 4.5, anchor: 'start' };
-      if (d === 'w') return { lx: st.x - 14, ly: st.y + 4.5, anchor: 'end' };
-      if (d === 's') return { lx: st.x, ly: st.y + 24, anchor: 'middle' };
-      return { lx: st.x, ly: st.y - 13, anchor: 'middle' };
-    };
     const stations = [],
       ghosts = [];
     for (const id in STATIONS) {
       const st = STATIONS[id];
       const click = () => this.setState({ sel: id });
-      const isSel = id === sel;
-      const enter = () => this.setHoverStation(id);
-      const leave = () => this.clearHoverStation(id);
       if (this.stationVisible(id, year)) {
         const serving = this.servingLines(id).filter((s) => year >= s.o && (!s.c || year < s.c));
         const inter = serving.length >= 2;
         const fullLabel = this.stationName(st, year);
-        const showLabel = z >= ZOOM_LABEL_THRESHOLD || inter || isSel;
         const servedByHover = !hoverLine || serving.some((s) => s.line.id === hoverLine);
-        const p = lp(st);
         stations.push({
           id,
           x: st.x,
           y: st.y,
           onClick: click,
-          onMouseEnter: enter,
-          onMouseLeave: leave,
-          label: showLabel ? fullLabel : '',
-          fullLabel,
-          lx: p.lx,
-          ly: p.ly,
-          anchor: p.anchor,
+          layout: labelLayout(fullLabel, st.lp || 'n', st.x, st.y),
           fw: inter ? 700 : 400,
           r: inter ? 8 : 5,
           fill: inter ? '#f2ecdc' : '#2c2620',
@@ -310,21 +278,13 @@ export default class App extends React.Component {
           opacity: servedByHover ? 1 : 0.25,
         });
       } else if (showClosed && st.c && year >= st.c) {
-        const fullLabel = this.stationName(st, 9999) + ' †';
-        const showLabel = z >= ZOOM_LABEL_THRESHOLD || isSel;
-        const p = lp(st);
+        const fullLabel = this.stationName(st, 9999) + ' \u2020';
         ghosts.push({
           id,
           x: st.x,
           y: st.y,
           onClick: click,
-          onMouseEnter: enter,
-          onMouseLeave: leave,
-          label: showLabel ? fullLabel : '',
-          fullLabel,
-          lx: p.lx,
-          ly: p.ly,
-          anchor: p.anchor,
+          layout: labelLayout(fullLabel, st.lp || 'n', st.x, st.y),
           opacity: hoverLine ? 0.2 : 0.55,
         });
       }
@@ -332,55 +292,34 @@ export default class App extends React.Component {
     vals.stations = stations;
     vals.ghosts = ghosts;
 
-    // hover tooltip — only for a station whose label is currently hidden by zoom.
-    if (hoverStation) {
-      const hovered = stations.find((s) => s.id === hoverStation) || ghosts.find((g) => g.id === hoverStation);
-      if (hovered && !hovered.label) {
-        vals.tooltip = {
-          text: hovered.fullLabel,
-          leftPct: ((hovered.x - view.x) / view.w) * 100,
-          topPct: ((hovered.y - view.y) / view.h) * 100,
-        };
-      }
-    }
-
     // SVG <text> labels must be real text nodes — built here as elements.
+    // Fixed map-unit size (TfL Go style): labels scale with the map.
+    const textEl = (key, layout, style, opacity) =>
+      React.createElement(
+        'text',
+        { key, textAnchor: layout.anchor, opacity, style },
+        layout.lines.map((line, i) =>
+          React.createElement('tspan', { key: i, x: layout.lx, y: layout.baselines[i] }, line)
+        )
+      );
     const labels = [];
     for (const s of stations)
-      if (s.label)
-        labels.push(
-          React.createElement(
-            'text',
-            {
-              key: 'l' + s.x + ',' + s.y,
-              x: s.lx,
-              y: s.ly,
-              textAnchor: s.anchor,
-              fontWeight: s.fw,
-              style: { fontFamily: "'Hammersmith One',sans-serif", fontSize: fontSvg, fill: '#2c2620' },
-            },
-            s.label
-          )
-        );
+      labels.push(
+        textEl('l' + s.id, s.layout, {
+          fontFamily: "'Hammersmith One',sans-serif",
+          fontSize: LABEL_FS,
+          fontWeight: s.fw,
+          fill: '#2c2620',
+        }, s.opacity)
+      );
     for (const g of ghosts)
       labels.push(
-        React.createElement(
-          'text',
-          {
-            key: 'g' + g.x + ',' + g.y,
-            x: g.lx,
-            y: g.ly,
-            textAnchor: g.anchor,
-            opacity: 0.65,
-            style: {
-              fontFamily: "'Hammersmith One',sans-serif",
-              fontSize: fontSvg,
-              fontStyle: 'italic',
-              fill: '#8d8172',
-            },
-          },
-          g.label
-        )
+        textEl('g' + g.id, g.layout, {
+          fontFamily: "'Hammersmith One',sans-serif",
+          fontSize: LABEL_FS,
+          fontStyle: 'italic',
+          fill: '#8d8172',
+        }, 0.65)
       );
     vals.labelsLayer = labels;
 
@@ -461,19 +400,55 @@ export default class App extends React.Component {
     }
   }
 
-  // --- map pan ---
+  // --- map pan & pinch ---
   panStart(e) {
     if (e.button !== undefined && e.button !== 0) return;
-    // Defer pointer capture to the first move: capturing on pointerdown makes
-    // Chrome retarget the ensuing `click` to the SVG, which would swallow the
-    // station <g> onClick. Capturing on drag preserves pan-with-capture while
-    // letting a plain click through to the station beneath.
-    this._pan = { x: e.clientX, y: e.clientY, view: { ...this.state.view }, pointerId: e.pointerId, captured: false };
+    if (!this._pts) this._pts = new Map();
+    this._pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this._pts.size === 2) {
+      // Two pointers: enter pinch mode, anchored to the gesture midpoint.
+      const el = this._svgRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const [a, b] = [...this._pts.values()];
+      const midX = (a.x + b.x) / 2,
+        midY = (a.y + b.y) / 2;
+      const view = this.state.view;
+      this._pinch = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        view: { ...view },
+        wx: view.x + ((midX - rect.left) / rect.width) * view.w,
+        wy: view.y + ((midY - rect.top) / rect.height) * view.h,
+      };
+      this._pan = null;
+      el.setPointerCapture && el.setPointerCapture(e.pointerId);
+    } else {
+      // Defer pointer capture to the first move: capturing on pointerdown makes
+      // Chrome retarget the ensuing `click` to the SVG, which would swallow the
+      // station <g> onClick. Capturing on drag preserves pan-with-capture while
+      // letting a plain click through to the station beneath.
+      this._pan = { x: e.clientX, y: e.clientY, view: { ...this.state.view }, pointerId: e.pointerId, captured: false };
+    }
   }
   panMove(e) {
-    if (!this._pan) return;
+    if (this._pts && this._pts.has(e.pointerId)) this._pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const el = this._svgRef.current;
     if (!el) return;
+    if (this._pinch && this._pts && this._pts.size >= 2) {
+      const rect = el.getBoundingClientRect();
+      const [a, b] = [...this._pts.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const midX = (a.x + b.x) / 2,
+        midY = (a.y + b.y) / 2;
+      const k = this._pinch.dist / dist;
+      const w = Math.min(W * 1.4, Math.max(280, this._pinch.view.w * k));
+      const h = w * (H / W);
+      const fx = (midX - rect.left) / rect.width,
+        fy = (midY - rect.top) / rect.height;
+      this.setState({ view: { x: this._pinch.wx - fx * w, y: this._pinch.wy - fy * h, w, h } });
+      return;
+    }
+    if (!this._pan) return;
     if (!this._pan.captured) {
       this._pan.captured = true;
       el.setPointerCapture && el.setPointerCapture(this._pan.pointerId);
@@ -486,8 +461,19 @@ export default class App extends React.Component {
       view: { ...this.state.view, x: this._pan.view.x - dx, y: this._pan.view.y - dy },
     });
   }
-  panEnd() {
-    this._pan = null;
+  panEnd(e) {
+    if (this._pts && e && e.pointerId !== undefined) this._pts.delete(e.pointerId);
+    if (this._pinch && (!this._pts || this._pts.size < 2)) {
+      this._pinch = null;
+      if (this._pts && this._pts.size === 1) {
+        // Hand off from pinch to a single-pointer pan without a jump.
+        const [id] = [...this._pts.keys()];
+        const rest = this._pts.get(id);
+        this._pan = { x: rest.x, y: rest.y, view: { ...this.state.view }, pointerId: id, captured: true };
+        return;
+      }
+    }
+    if (!this._pts || this._pts.size === 0) this._pan = null;
   }
 
   // --- timeline track ---
@@ -605,6 +591,10 @@ export default class App extends React.Component {
                 onPointerMove={(e) => this.panMove(e)}
                 onPointerUp={(e) => this.panEnd(e)}
                 onPointerLeave={(e) => this.panEnd(e)}
+                onDoubleClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  this.zoomAt((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height, 1 / 1.6);
+                }}
                 ref={this._svgRef}
               >
                 <g>
@@ -702,28 +692,6 @@ export default class App extends React.Component {
                   )}
                 </g>
               </svg>
-
-              {/* Station tooltip (shown when a station's label is hidden by zoom) */}
-              {v.tooltip && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: v.tooltip.leftPct + '%',
-                    top: v.tooltip.topPct + '%',
-                    transform: 'translate(-50%,-140%)',
-                    background: '#faf5e8',
-                    border: '1px solid #b8ab8c',
-                    padding: '2px 7px',
-                    fontFamily: "'Hammersmith One',sans-serif",
-                    fontSize: 12,
-                    color: '#2c2620',
-                    whiteSpace: 'nowrap',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  {v.tooltip.text}
-                </div>
-              )}
 
               {/* Search + Legend */}
               <div

@@ -6,6 +6,7 @@
 //          (d) every station id referenced in a segment exists.
 // Exits non-zero with a list of violations.
 import { STATIONS, LINES, THAMES } from '../src/tube-data.js';
+import { labelLayout, boxesOverlap } from '../src/label-layout.js';
 
 const MARGIN = { xMin: 80, xMax: 2370, yMin: 60, yMax: 1500 };
 const GRID = 5;
@@ -117,11 +118,71 @@ for (let i = 0; i < ids.length; i++) {
   }
 }
 
+
+// (f) label collisions — labels are fixed map-unit size and always visible,
+// so a collision at any year is a permanent defect. Era names and station
+// sets change over time; check every year where anything can change.
+function stationName(st, year) {
+  if (!st.r) return st.n;
+  let name = st.r[0][1];
+  for (const [y, n] of st.r) if (y <= year) name = n;
+  return name;
+}
+function stationVisible(id, year) {
+  const st = STATIONS[id];
+  if (!st || year < st.o || (st.c && year >= st.c)) return false;
+  for (const line of LINES)
+    for (const sg of line.segs)
+      if (year >= sg.o && (!sg.c || year < sg.c) && sg.pts.includes(id)) return true;
+  return false;
+}
+const changeYears = new Set([1900]);
+for (const st of Object.values(STATIONS)) {
+  changeYears.add(Math.max(1900, st.o));
+  if (st.c) changeYears.add(st.c);
+  if (st.r) for (const [y] of st.r) changeYears.add(Math.max(1900, y));
+}
+for (const line of LINES)
+  for (const sg of line.segs) {
+    changeYears.add(Math.max(1900, sg.o));
+    if (sg.c) changeYears.add(sg.c);
+  }
+const labelViolations = new Map(); // pair key -> first year
+for (const year of [...changeYears].sort()) {
+  if (year > 2026) continue;
+  const boxes = [];
+  for (const [id, st] of Object.entries(STATIONS)) {
+    if (stationVisible(id, year)) {
+      boxes.push({ id, box: labelLayout(stationName(st, year), st.lp || 'n', st.x, st.y).box });
+    } else if (st.c && year >= st.c) {
+      boxes.push({ id, box: labelLayout(stationName(st, 9999) + ' \u2020', st.lp || 'n', st.x, st.y).box });
+    }
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (boxesOverlap(boxes[i].box, boxes[j].box)) {
+        const key = boxes[i].id + '~' + boxes[j].id;
+        if (!labelViolations.has(key)) labelViolations.set(key, year);
+      }
+    }
+    // label overlapping another station's dot
+    for (const [oid, ost] of Object.entries(STATIONS)) {
+      if (oid === boxes[i].id) continue;
+      const dot = { x1: ost.x - 8, x2: ost.x + 8, y1: ost.y - 8, y2: ost.y + 8 };
+      if (boxesOverlap(boxes[i].box, dot)) {
+        const key = boxes[i].id + ' label over dot ' + oid;
+        if (!labelViolations.has(key)) labelViolations.set(key, year);
+      }
+    }
+  }
+}
+for (const [key, year] of labelViolations) v(`label collision (${year}): ${key}`);
+
 if (violations.length) {
   console.error(`\n✗ layout check FAILED — ${violations.length} violation(s):\n`);
   for (const m of violations) console.error('  • ' + m);
   console.error('');
   process.exit(1);
 } else {
-  console.log('✓ layout check passed — octolinear, spaced, in-bounds.');
+  console.log('✓ layout check passed — octolinear, spaced, in-bounds, zero label collisions across all eras.');
 }

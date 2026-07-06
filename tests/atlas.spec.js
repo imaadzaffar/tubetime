@@ -91,19 +91,47 @@ test('zoom controls change the viewBox and fit resets it', async ({ page }) => {
   await expect(svg).toHaveAttribute('viewBox', DEFAULT_VIEWBOX);
 });
 
-test('zoom-aware labels: non-interchange labels hide at fit and reappear when zoomed in', async ({ page }) => {
+test('labels are always visible and scale with the map (TfL Go style)', async ({ page }) => {
   await scrubTo(page, 1);
   await expect(page.getByTestId('year')).toHaveText('2026');
 
   const svg = page.getByTestId('map-svg');
-  // At fit (z=1), only interchange stations like Baker Street get labels.
-  await expect(svg.getByText('Maida Vale', { exact: true })).toBeHidden();
+  // Every station label renders, even minor ones, at fit zoom.
+  const maidaVale = svg.getByText('Maida Vale', { exact: true });
+  await expect(maidaVale).toBeVisible();
   await expect(svg.getByText('Baker Street', { exact: true })).toBeVisible();
 
-  // Two zoom-in clicks give z ≈ 1.82, above the 1.6 threshold — all labels show.
+  // Labels live in map units: zooming in makes the text physically larger.
+  const before = await maidaVale.boundingBox();
   await page.getByTestId('zoom-in').click();
   await page.getByTestId('zoom-in').click();
-  await expect(svg.getByText('Maida Vale', { exact: true })).toBeVisible();
+  const after = await maidaVale.boundingBox();
+  expect(after.height).toBeGreaterThan(before.height * 1.5);
+});
+
+test('double-click zooms the map toward the pointer', async ({ page }) => {
+  const svg = page.getByTestId('map-svg');
+  await expect(svg).toHaveAttribute('viewBox', DEFAULT_VIEWBOX);
+  const box = await svg.boundingBox();
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  const vb = (await svg.getAttribute('viewBox')).split(' ').map(Number);
+  expect(vb[2]).toBeLessThan(2450);
+});
+
+test('pinch gesture zooms the map (touch)', async ({ page }) => {
+  const svg = page.getByTestId('map-svg');
+  await expect(svg).toHaveAttribute('viewBox', DEFAULT_VIEWBOX);
+  const box = await svg.boundingBox();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.synthesizePinchGesture', {
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2,
+    scaleFactor: 2,
+    relativeSpeed: 400,
+  });
+  await expect
+    .poll(async () => Number((await svg.getAttribute('viewBox')).split(' ')[2]))
+    .toBeLessThan(2000);
 });
 
 test('station search finds and jumps to a station', async ({ page }) => {

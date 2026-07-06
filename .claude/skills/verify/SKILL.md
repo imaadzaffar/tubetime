@@ -16,6 +16,9 @@ Surface is a single-page SVG map. Flows worth driving after any change:
 
 - **Initial load**: header "LONDON'S UNDERGROUND RAILWAYS", year 1900 (clear
   localStorage key `tube-atlas-year` first — year persists across reloads).
+  All station labels are always visible and live in map units (TfL Go style):
+  they scale with zoom. The layout checker proves zero label collisions, so
+  any overlapping text on screen is a bug.
 - **Timeline**: click/drag the track at the bottom → year + legend + caption +
   operator all change. Play button (bottom-left) animates 4 yrs/s and stops at 2026.
 - **Stations**: every visible station/ghost `<g>` carries `data-station-id="<id>"`
